@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>手機數字掃描器</title>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #f0f2f5;
+            margin: 0;
+            padding: 20px;
+        }
+        h2 { color: #333; }
+        
+        /* 影片預覽區塊 */
+        .video-container {
+            position: relative;
+            width: 100%;
+            max-width: 400px;
+            margin-bottom: 20px;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        
+        video {
+            width: 100%;
+            display: block;
+        }
+
+        /* 掃描按鈕 */
+        button {
+            padding: 15px 30px;
+            font-size: 18px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 50px;
+            cursor: pointer;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+            transition: background 0.3s;
+        }
+        button:active { background-color: #0056b3; }
+        button:disabled { background-color: #ccc; }
+
+        /* 結果顯示區 */
+        #result {
+            margin-top: 20px;
+            padding: 15px;
+            background: white;
+            border-radius: 8px;
+            width: 90%;
+            max-width: 380px;
+            min-height: 50px;
+            text-align: center;
+            font-size: 24px;
+            font-weight: bold;
+            color: #333;
+            border: 1px solid #ddd;
+        }
+
+        #status {
+            font-size: 14px;
+            color: #666;
+            margin-top: 10px;
+        }
+
+        /* 隱藏 Canvas，僅用於處理影像 */
+        canvas { display: none; }
+    </style>
+</head>
+<body>
+
+    <h2>📸 數字掃描辨識</h2>
+    
+    <div class="video-container">
+        <video id="video" playsinline autoplay></video>
+    </div>
+
+    <button id="scanBtn">開始掃描</button>
+    <div id="status">準備就緒</div>
+    <div id="result">---</div>
+
+    <canvas id="canvas"></canvas>
+
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const scanBtn = document.getElementById('scanBtn');
+        const resultDiv = document.getElementById('result');
+        const statusDiv = document.getElementById('status');
+        let worker = null;
+
+        // 1. 初始化相機
+        async function initCamera() {
+            try {
+                // facingMode: 'environment' 強制使用手機後鏡頭
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: 'environment' } 
+                });
+                video.srcObject = stream;
+            } catch (err) {
+                console.error("相機啟動失敗:", err);
+                statusDiv.innerText = "無法存取相機，請確保使用 HTTPS 或本機測試。";
+            }
+        }
+
+        // 2. 初始化 Tesseract Worker (OCR 引擎)
+        async function initTesseract() {
+            statusDiv.innerText = "正在載入 OCR 引擎...";
+            worker = await Tesseract.createWorker('eng'); // 數字通常使用英文庫即可
+            
+            // 設定白名單：只辨識數字 (0123456789)，大幅提高準確率
+            await worker.setParameters({
+                tessedit_char_whitelist: '0123456789',
+            });
+            
+            statusDiv.innerText = "引擎就緒，請對準數字並點擊掃描";
+        }
+
+        // 3. 執行掃描與辨識
+        scanBtn.addEventListener('click', async () => {
+            if (!worker) return;
+
+            // 鎖定按鈕避免重複點擊
+            scanBtn.disabled = true;
+            scanBtn.innerText = "辨識中...";
+            resultDiv.innerText = "分析中...";
+
+            // 將當前影片畫面畫到 Canvas 上
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+            // 進行辨識
+            try {
+                const { data: { text } } = await worker.recognize(canvas);
+                
+                // 顯示結果
+                if (text.trim() === "") {
+                    resultDiv.innerText = "未能辨識，請重試";
+                } else {
+                    resultDiv.innerText = text;
+                }
+            } catch (err) {
+                console.error(err);
+                resultDiv.innerText = "辨識錯誤";
+            } finally {
+                // 恢復按鈕狀態
+                scanBtn.disabled = false;
+                scanBtn.innerText = "再次掃描";
+            }
+        });
+
+        // 頁面載入時啟動
+        (async () => {
+            await initCamera();
+            await initTesseract();
+        })();
+
+    </script>
+</body>
+</html>
