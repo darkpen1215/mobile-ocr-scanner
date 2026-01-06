@@ -106,7 +106,7 @@
 </head>
 <body>
 
-    <h2>⚡ 即時數字掃描 V2</h2>
+    <h2>⚡ 即時數字掃描 V3</h2>
     
     <div class="video-container">
         <video id="video" playsinline autoplay></video>
@@ -126,131 +126,153 @@
     <canvas id="canvas"></canvas>
 
     <script>
-        const video = document.getElementById('video');
-        const canvas = document.getElementById('canvas');
-        const toggleBtn = document.getElementById('toggleBtn');
-        const resultText = document.getElementById('result-text');
-        const statusDiv = document.getElementById('status');
-        
-        let worker = null;
-        let isScanning = false;
+const video = document.getElementById('video');
+const canvas = document.getElementById('canvas');
+const toggleBtn = document.getElementById('toggleBtn');
+const resultText = document.getElementById('result-text');
+const statusDiv = document.getElementById('status');
 
-        // 初始化相機
-        async function initCamera() {
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({ 
-                    video: { 
-                        facingMode: 'environment',
-                        width: { ideal: 1280 },
-                        height: { ideal: 720 }
-                    } 
-                });
-                video.srcObject = stream;
-                return new Promise(resolve => {
-                    video.onloadedmetadata = () => {
-                        video.play();
-                        resolve();
-                    };
-                });
-            } catch (err) {
-                statusDiv.innerText = "相機錯誤:請確保使用 HTTPS 存取";
-            }
-        }
+let worker = null;
+let isScanning = false;
+let resultBuffer = []; 
+const BUFFER_SIZE = 6; // 緩衝區大小，數值越大越穩定但反應慢
 
-        // 初始化 Tesseract
-        async function initTesseract() {
-            statusDiv.innerText = "正在優化 OCR 引擎...";
-            worker = await Tesseract.createWorker('eng');
-            
-            // 重要參數設定
-            await worker.setParameters({
-                tessedit_char_whitelist: '0123456789', // 只看數字
-                tessedit_pageseg_mode: '7',           // 視為單一文字行 (重要！)
-            });
-            
-            toggleBtn.disabled = false;
-            toggleBtn.innerText = "開始即時掃描";
-            statusDiv.innerText = "系統就緒";
-        }
-
-        // 影像處理函數：大幅提升辨識率
-        function preprocessImage(ctx, width, height) {
-            const imageData = ctx.getImageData(0, 0, width, height);
-            const data = imageData.data;
-            
-            for (let i = 0; i < data.length; i += 4) {
-                // 轉灰階
-                const avg = (data[i] + data[i + 1] + data[i + 2]) / 3;
-                // 簡單二值化 (門檻值設為 128)
-                const val = avg > 120 ? 255 : 0; 
-                data[i] = data[i + 1] = data[i + 2] = val;
-            }
-            ctx.putImageData(imageData, 0, 0);
-        }
-
-        // 執行掃描
-        async function performScan() {
-            if (!isScanning) return;
-
-            const w = video.videoWidth;
-            const h = video.videoHeight;
-            if (w === 0) return;
-
-            const ctx = canvas.getContext('2d', { willReadFrequently: true });
-
-            // 根據 CSS 比例精確裁切中央區域
-            const cropW = w * 0.7;
-            const cropH = (h / video.offsetHeight) * 60; // 對應 CSS 的 60px
-            const startX = (w - cropW) / 2;
-            const startY = (h - cropH) / 2;
-
-            canvas.width = cropW;
-            canvas.height = cropH;
-
-            // 畫到 Canvas 並處理圖片
-            ctx.drawImage(video, startX, startY, cropW, cropH, 0, 0, cropW, cropH);
-            preprocessImage(ctx, cropW, cropH);
-
-            try {
-                const { data: { text, confidence } } = await worker.recognize(canvas);
-                const cleanText = text.replace(/\D/g, ''); // 再次確保過濾掉非數字
-
-                if (cleanText.length > 0 && confidence > 40) {
-                    resultText.innerText = cleanText;
-                    resultText.style.color = "#00ff00";
-                } else {
-                    resultText.style.color = "#444";
-                }
-            } catch (err) {
-                console.error(err);
-            }
-
-            // 使用 setTimeout 遞迴，確保上一次辨識完才跑下一次，防止手機過熱
-            if (isScanning) {
-                setTimeout(performScan, 400); 
-            }
-        }
-
-        toggleBtn.addEventListener('click', () => {
-            if (isScanning) {
-                isScanning = false;
-                toggleBtn.innerText = "開始即時掃描";
-                toggleBtn.classList.remove('stop');
-                statusDiv.innerText = "已暫停";
-            } else {
-                isScanning = true;
-                toggleBtn.innerText = "停止掃描";
-                toggleBtn.classList.add('stop');
-                statusDiv.innerText = "掃描中...";
-                performScan();
-            }
+// 1. 初始化相機
+async function initCamera() {
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+            video: { 
+                facingMode: 'environment',
+                width: { ideal: 1280 },
+                height: { ideal: 720 }
+            } 
         });
+        video.srcObject = stream;
+        return new Promise(resolve => {
+            video.onloadedmetadata = () => {
+                video.play();
+                resolve();
+            };
+        });
+    } catch (err) {
+        statusDiv.innerText = "相機錯誤: 請確保使用 HTTPS 存取";
+    }
+}
 
-        (async () => {
-            await initCamera();
-            await initTesseract();
-        })();
+// 2. 初始化 Tesseract 並設定 PSM 7 (單行辨識)
+async function initTesseract() {
+    statusDiv.innerText = "優化 4 位數辨識引擎...";
+    worker = await Tesseract.createWorker('eng');
+    
+    await worker.setParameters({
+        tessedit_char_whitelist: '0123456789', 
+        tessedit_pageseg_mode: '7', // 重要：視為單一文字行
+    });
+    
+    toggleBtn.disabled = false;
+    toggleBtn.innerText = "開始掃描 4 位數";
+    statusDiv.innerText = "系統就緒";
+}
+
+// 3. 影像處理：二值化與銳化
+function preprocessImage(ctx, width, height) {
+    const imageData = ctx.getImageData(0, 0, width, height);
+    const data = imageData.data;
+    for (let i = 0; i < data.length; i += 4) {
+        const avg = (data[i] + data[i + 1] + data[i + 2]) / 3;
+        // 提高對比門檻，讓 1/7 與 3/9 的邊緣更銳利
+        const val = avg > 110 ? 255 : 0; 
+        data[i] = data[i + 1] = data[i + 2] = val;
+    }
+    ctx.putImageData(imageData, 0, 0);
+}
+
+// 4. 投票邏輯：確保 4 位數結果穩定
+function updateStableResult(newText) {
+    // 只處理長度為 4 的結果
+    if (newText.length !== 4) return;
+
+    resultBuffer.push(newText);
+    if (resultBuffer.length > BUFFER_SIZE) resultBuffer.shift();
+
+    const counts = {};
+    resultBuffer.forEach(val => counts[val] = (counts[val] || 0) + 1);
+    
+    // 找出頻率最高的結果
+    const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+    const [topResult, occurrence] = sorted[0];
+
+    // 如果 6 次辨識中有 3 次以上相同，就更新顯示
+    if (occurrence >= 3) {
+        resultText.innerText = topResult;
+        resultText.style.color = "#00ff00";
+        resultText.style.textShadow = "0 0 15px rgba(0, 255, 0, 0.8)";
+    }
+}
+
+// 5. 核心掃描循環
+async function performScan() {
+    if (!isScanning) return;
+
+    const w = video.videoWidth;
+    const h = video.videoHeight;
+    if (w === 0) return;
+
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+    // 針對 4 位數優化裁切範圍 (稍微收窄寬度)
+    const cropW = w * 0.5; 
+    const cropH = (h / video.offsetHeight) * 80;
+    const startX = (w - cropW) / 2;
+    const startY = (h - cropH) / 2;
+
+    // 放大 2 倍以提升辨識細節
+    canvas.width = cropW * 2;
+    canvas.height = cropH * 2;
+
+    ctx.drawImage(video, startX, startY, cropW, cropH, 0, 0, canvas.width, canvas.height);
+    preprocessImage(ctx, canvas.width, canvas.height);
+
+    try {
+        const { data: { text, confidence } } = await worker.recognize(canvas);
+        const cleanText = text.replace(/\D/g, '').trim();
+
+        // 過濾機制：信心度 > 45 且長度為 4
+        if (cleanText.length === 4 && confidence > 45) {
+            updateStableResult(cleanText);
+        } else {
+            // 如果辨識不到 4 位數，逐漸淡化結果顏色（視覺提示）
+            resultText.style.color = "#444";
+        }
+    } catch (err) {
+        console.error("OCR Error:", err);
+    }
+
+    if (isScanning) setTimeout(performScan, 300); 
+}
+
+// 按鈕監聽
+toggleBtn.addEventListener('click', () => {
+    if (isScanning) {
+        isScanning = false;
+        toggleBtn.innerText = "開始掃描 4 位數";
+        toggleBtn.classList.remove('stop');
+        resultBuffer = [];
+    } else {
+        isScanning = true;
+        toggleBtn.innerText = "停止掃描";
+        toggleBtn.classList.add('stop');
+        performScan();
+    }
+});
+
+// 啟動
+(async () => {
+    await initCamera();
+    await initTesseract();
+})();
     </script>
 </body>
 
 </html>
+
