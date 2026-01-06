@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>即時數字掃描器</title>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #222; /* 改為深色背景，讓畫面更清楚 */
+            color: white;
+            margin: 0;
+            padding: 20px;
+        }
+
+        h2 { margin-bottom: 10px; }
+
+        /* 影片容器：相對定位，為了放紅框 */
+        .video-container {
+            position: relative;
+            width: 100%;
+            max-width: 400px;
+            margin-bottom: 20px;
+            overflow: hidden;
+            border-radius: 10px;
+            background: #000;
+        }
+
+        video {
+            width: 100%;
+            display: block;
+            opacity: 0.8; /* 稍微變暗，突顯掃描框 */
+        }
+
+        /* 掃描紅框 (Region of Interest) */
+        .scan-region {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 80%;       /* 掃描框寬度 */
+            height: 80px;     /* 掃描框高度 (針對數字優化，設扁一點) */
+            border: 2px solid #00ff00; /* 綠色框代表掃描區 */
+            box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.5); /* 讓框外變暗 */
+            z-index: 10;
+        }
+        
+        /* 掃描線動畫 */
+        .scan-line {
+            width: 100%;
+            height: 2px;
+            background: #00ff00;
+            position: absolute;
+            top: 0;
+            animation: scanMove 2s infinite linear;
+        }
+
+        @keyframes scanMove {
+            0% { top: 0; }
+            100% { top: 100%; }
+        }
+
+        /* 控制區 */
+        button {
+            padding: 15px 40px;
+            font-size: 18px;
+            background-color: #00ff00;
+            color: #000;
+            border: none;
+            border-radius: 50px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.3s;
+        }
+        button.stop {
+            background-color: #ff4444;
+            color: white;
+        }
+        button:disabled { background-color: #555; color: #888; }
+
+        /* 結果顯示 */
+        #result-box {
+            margin-top: 20px;
+            padding: 10px;
+            text-align: center;
+        }
+        #result-label { font-size: 14px; color: #aaa; }
+        #result-text {
+            font-size: 40px;
+            font-weight: bold;
+            color: #00ff00;
+            font-family: 'Courier New', monospace;
+            min-height: 50px;
+        }
+        #status { font-size: 12px; color: #888; margin-top: 5px; }
+
+        canvas { display: none; }
+    </style>
+</head>
+<body>
+
+    <h2>⚡ 即時數字掃描</h2>
+    
+    <div class="video-container">
+        <video id="video" playsinline autoplay></video>
+        <div class="scan-region">
+            <div class="scan-line"></div>
+        </div>
+    </div>
+
+    <button id="toggleBtn" disabled>載入引擎中...</button>
+    
+    <div id="result-box">
+        <div id="result-label">偵測結果</div>
+        <div id="result-text">---</div>
+        <div id="status">初始化中...</div>
+    </div>
+
+    <canvas id="canvas"></canvas>
+
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const toggleBtn = document.getElementById('toggleBtn');
+        const resultText = document.getElementById('result-text');
+        const statusDiv = document.getElementById('status');
+        
+        let worker = null;
+        let isScanning = false;
+        let scanInterval = null;
+
+        // 1. 初始化相機
+        async function initCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: 'environment' } 
+                });
+                video.srcObject = stream;
+                // 等待影片 metadata 載入，確保能讀取到寬高
+                return new Promise(resolve => {
+                    video.onloadedmetadata = () => {
+                        video.play();
+                        resolve();
+                    };
+                });
+            } catch (err) {
+                console.error("相機錯誤:", err);
+                statusDiv.innerText = "相機存取失敗 (請檢查 HTTPS)";
+            }
+        }
+
+        // 2. 初始化 Tesseract
+        async function initTesseract() {
+            worker = await Tesseract.createWorker('eng');
+            await worker.setParameters({
+                tessedit_char_whitelist: '0123456789', // 僅辨識數字
+            });
+            toggleBtn.disabled = false;
+            toggleBtn.innerText = "開始即時掃描";
+            statusDiv.innerText = "系統就緒";
+        }
+
+        // 3. 核心：處理影像裁切與辨識
+        async function performScan() {
+            if (!worker || !isScanning) return;
+
+            // 確保影片有寬高
+            if (video.videoWidth === 0 || video.videoHeight === 0) return;
+
+            const ctx = canvas.getContext('2d');
+
+            // --- 計算裁切區域 (重要！) ---
+            // 我們只擷取影片正中央的區塊，對應 CSS 的 .scan-region
+            // 這裡假設掃描框是影片寬度的 80%，高度是 80px (依據 CSS 設定比例估算)
+            // 為了簡化，我們抓取影片中央 60% 寬度, 20% 高度的區域進行分析
+            const w = video.videoWidth;
+            const h = video.videoHeight;
+            
+            const cropWidth = w * 0.6;   // 裁切寬度
+            const cropHeight = h * 0.2;  // 裁切高度 (聚焦在數字行)
+            const startX = (w - cropWidth) / 2;
+            const startY = (h - cropHeight) / 2;
+
+            // 設定 Canvas 大小等於裁切後的大小 (這樣 OCR 跑更快)
+            canvas.width = cropWidth;
+            canvas.height = cropHeight;
+
+            // 將影片的「中央區域」畫到 Canvas 上
+            ctx.drawImage(video, startX, startY, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
+
+            // 執行辨識
+            try {
+                const { data: { text, confidence } } = await worker.recognize(canvas);
+                
+                // 過濾雜訊：只有當信心度夠高且有內容時才更新
+                const cleanText = text.trim();
+                if (cleanText.length > 0 && confidence > 50) {
+                    resultText.innerText = cleanText;
+                    // 如果辨識成功，可以讓字閃爍一下或變色
+                }
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        // 4. 按鈕控制
+        toggleBtn.addEventListener('click', () => {
+            if (isScanning) {
+                // 停止掃描
+                isScanning = false;
+                clearInterval(scanInterval);
+                toggleBtn.innerText = "開始即時掃描";
+                toggleBtn.classList.remove('stop');
+                statusDiv.innerText = "已暫停";
+            } else {
+                // 開始掃描
+                isScanning = true;
+                toggleBtn.innerText = "停止掃描";
+                toggleBtn.classList.add('stop');
+                statusDiv.innerText = "掃描中...";
+                
+                // 設定每 600 毫秒執行一次掃描 (避免手機過熱)
+                performScan(); // 先跑一次
+                scanInterval = setInterval(performScan, 600);
+            }
+        });
+
+        // 啟動程序
+        (async () => {
+            await initCamera();
+            await initTesseract();
+        })();
+
+    </script>
+</body>
+</html>
