@@ -139,7 +139,7 @@
             for (let i = 0; i < data.length; i += 4) {
                 const avg = (data[i] + data[i + 1] + data[i + 2]) / 3;
                 // 強力二值化：過濾灰色雜訊，讓數字黑白分明
-                const val = avg > 120 ? 255 : 0; 
+                const val = avg > 150 ? 255 : 0; 
                 data[i] = data[i + 1] = data[i + 2] = val;
             }
             ctx.putImageData(imageData, 0, 0);
@@ -164,8 +164,8 @@
             const startY = (h - cropH) / 2;
 
             // 放大 3 倍（單次掃描可以承受更高的運算量以換取精準度）
-            canvas.width = cropW * 3;
-            canvas.height = cropH * 3;
+            canvas.width = cropW * 5;
+            canvas.height = cropH * 5;
 
             ctx.drawImage(video, startX, startY, cropW, cropH, 0, 0, canvas.width, canvas.height);
             processCapture(ctx, canvas.width, canvas.height);
@@ -204,3 +204,4 @@
     </script>
 </body>
 </html>
+
