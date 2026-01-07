@@ -42,7 +42,7 @@
             left: 50%;
             transform: translate(-50%, -50%);
             width: 60%;       
-            height: 70px;     
+            height: 50px;     
             border: 3px solid #00ff00;
             box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.6);
             z-index: 10;
@@ -84,7 +84,7 @@
 </head>
 <body>
 
-    <h2>🎯 4位數精準辨識 V2</h2>
+    <h2>🎯 4位數精準辨識 V3</h2>
     
     <div class="video-container">
         <video id="video" playsinline autoplay></video>
@@ -126,7 +126,7 @@
             worker = await Tesseract.createWorker('eng');
             await worker.setParameters({
                 tessedit_char_whitelist: '0123456789',
-                tessedit_pageseg_mode: '7', // 視為單行文字
+                tessedit_pageseg_mode: '8', // 視為單行文字
             });
             scanBtn.disabled = false;
             scanBtn.innerText = "立即掃描";
@@ -204,5 +204,6 @@
     </script>
 </body>
 </html>
+
 
 
