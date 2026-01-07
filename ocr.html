@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>4位數精準辨識 V3 (穩定版)</title>
+    <title>4位數精準辨識 V4 (極致穩定版)</title>
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
     <style>
         body {
@@ -84,7 +84,7 @@
 </head>
 <body>
 
-    <h2>🎯 4位數精準辨識 V3 (穩定版)</h2>
+    <h2>🎯 4位數精準辨識 V4 (極致穩定版)</h2>
     
     <div class="video-container">
         <video id="video" playsinline autoplay></video>
@@ -112,10 +112,11 @@
         // 初始化相機
         async function initCamera() {
             try {
+                // 維持高解析度請求
                 const stream = await navigator.mediaDevices.getUserMedia({ 
                     video: { 
                         facingMode: 'environment', 
-                        width: 1920,   // 請求更高的解析度 
+                        width: 1920,   
                         height: 1080 
                     } 
                 });
@@ -132,7 +133,7 @@
             worker = await Tesseract.createWorker('eng');
             await worker.setParameters({
                 tessedit_char_whitelist: '0123456789',
-                tessedit_pageseg_mode: '8', // 維持 PSM=8 (單個單詞)
+                tessedit_pageseg_mode: '7', // 修正: 換回 PSM=7，提升速度
             });
             scanBtn.disabled = false;
             scanBtn.innerText = "立即掃描";
@@ -154,13 +155,11 @@
 
         // 執行單次辨識
         async function performScan() {
-            // UI 狀態更新
             scanBtn.disabled = true;
             scanBtn.innerText = "辨識中...";
             resultText.style.color = "#555";
-            statusDiv.innerText = "正在分析影像 (等待結果)...";
+            statusDiv.innerText = "正在分析影像 (極速模式)...";
 
-            // 確保 video metadata 已載入
             if (video.videoWidth === 0) {
                  statusDiv.innerText = "相機影像尚未準備好，請稍候。";
                  scanBtn.disabled = false;
@@ -184,23 +183,17 @@
             const startX = (w - cropW) / 2;
             const startY = (h - cropH) / 2;
 
-            // 修正: 降低放大倍數至 3 倍 (或 4 倍)，減少 Tesseract 計算量
-            const scaleFactor = 3; 
+            // 修正: 放大倍數降為 1 倍 (無放大)，極大化速度和穩定性
+            const scaleFactor = 1; 
             canvas.width = cropW * scaleFactor;
             canvas.height = cropH * scaleFactor;
 
             ctx.drawImage(video, startX, startY, cropW, cropH, 0, 0, canvas.width, canvas.height);
-            processCapture(ctx, canvas.width, canvas.height);
-
-            // 使用 Promise.race 實現超時機制，避免長時間卡住
-            const recognizePromise = worker.recognize(canvas);
-            const timeoutPromise = new Promise((_, reject) => 
-                setTimeout(() => reject(new Error("OCR 辨識超時 (Timeout)")), 5000) // 設置 5 秒超時
-            );
+            processCapture(ctx, canvas.width, canvas.height); // 預處理仍運行
 
             try {
-                const result = await Promise.race([recognizePromise, timeoutPromise]);
-                const { data: { text, confidence } } = result;
+                // 移除超時機制，讓它自然完成，因為現在的運算量已經非常低
+                const { data: { text, confidence } } = await worker.recognize(canvas);
                 
                 const digits = text.replace(/\D/g, '').trim(); 
 
@@ -220,11 +213,7 @@
             } catch (err) {
                 resultText.innerText = "----";
                 resultText.style.color = "#ff5555";
-                if (err.message.includes("Timeout")) {
-                    statusDiv.innerText = "辨識超時，請重試或靠近數字。";
-                } else {
-                    statusDiv.innerText = "辨識出錯，請重試";
-                }
+                statusDiv.innerText = "辨識出錯，請重試";
                 console.error("OCR error:", err);
             }
 
