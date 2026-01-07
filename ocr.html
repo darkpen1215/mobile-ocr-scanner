@@ -84,7 +84,7 @@
 </head>
 <body>
 
-    <h2>🎯 4位數精準辨識 V3</h2>
+    <h2>🎯 4位數精準辨識 V3.1</h2>
     
     <div class="video-container">
         <video id="video" playsinline autoplay></video>
@@ -126,7 +126,7 @@
             worker = await Tesseract.createWorker('eng');
             await worker.setParameters({
                 tessedit_char_whitelist: '0123456789',
-                tessedit_pageseg_mode: '8', // 視為單行文字
+                tessedit_pageseg_mode: '7', // 視為單行文字
             });
             scanBtn.disabled = false;
             scanBtn.innerText = "立即掃描";
@@ -204,6 +204,7 @@
     </script>
 </body>
 </html>
+
 
 
 
