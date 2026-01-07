@@ -84,7 +84,7 @@
 </head>
 <body>
 
-    <h2>🎯 4位數精準辨識 V3.1</h2>
+    <h2>🎯 4位數精準辨識 V3.2</h2>
     
     <div class="video-container">
         <video id="video" playsinline autoplay></video>
@@ -113,7 +113,7 @@
         async function initCamera() {
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ 
-                    video: { facingMode: 'environment', width: 1280, height: 720 } 
+                    video: { facingMode: 'environment', width: 1920, height: 1080 } 
                 });
                 video.srcObject = stream;
             } catch (err) {
@@ -159,13 +159,13 @@
 
             // 計算精確裁切位置
             const cropW = w * 0.6;
-            const cropH = (h / video.offsetHeight) * 70;
+            const cropH = (h / video.offsetHeight) * 50;
             const startX = (w - cropW) / 2;
             const startY = (h - cropH) / 2;
 
             // 放大 3 倍（單次掃描可以承受更高的運算量以換取精準度）
-            canvas.width = cropW * 5;
-            canvas.height = cropH * 5;
+            canvas.width = cropW * 3;
+            canvas.height = cropH * 3;
 
             ctx.drawImage(video, startX, startY, cropW, cropH, 0, 0, canvas.width, canvas.height);
             processCapture(ctx, canvas.width, canvas.height);
@@ -204,6 +204,7 @@
     </script>
 </body>
 </html>
+
 
 
 
