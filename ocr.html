@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>4位數精準掃描器</title>
+    <title>4位數精準掃描器 V2</title>
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
     <style>
         body {
@@ -21,7 +21,7 @@
             position: relative;
             width: 100%;
             max-width: 400px;
-            aspect-ratio: 1/1; /* 改為正方形更直覺 */
+            aspect-ratio: 1/1; 
             margin-bottom: 20px;
             overflow: hidden;
             border-radius: 20px;
@@ -35,14 +35,14 @@
             object-fit: cover;
         }
 
-        /* 掃描框區域 */
+        /* 掃描框區域 (高度增加到 100px) */
         .scan-region {
             position: absolute;
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
             width: 60%;       
-            height: 70px;     
+            height: 100px;     /* 修正: 增加高度以容納更小的目標 */
             border: 3px solid #00ff00;
             box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.6);
             z-index: 10;
@@ -84,7 +84,7 @@
 </head>
 <body>
 
-    <h2>🎯 4位數精準辨識 V1</h2>
+    <h2>🎯 4位數精準辨識 V2 (優化版)</h2>
     
     <div class="video-container">
         <video id="video" playsinline autoplay></video>
@@ -113,23 +113,30 @@
         async function initCamera() {
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ 
-                    video: { facingMode: 'environment', width: 1280, height: 720 } 
+                    video: { 
+                        facingMode: 'environment', 
+                        width: 1920,   // 修正: 請求更高的解析度 
+                        height: 1080 
+                    } 
                 });
                 video.srcObject = stream;
             } catch (err) {
                 statusDiv.innerText = "無法存取相機，請檢查 HTTPS 設定";
+                console.error("Camera access error:", err);
             }
         }
 
         // 初始化 Tesseract
         async function initTesseract() {
+            statusDiv.innerText = "正在載入辨識引擎...";
             worker = await Tesseract.createWorker('eng');
             await worker.setParameters({
                 tessedit_char_whitelist: '0123456789',
-                tessedit_pageseg_mode: '7', // 視為單行文字
+                tessedit_pageseg_mode: '8', // 修正: 視為單個單詞 (常用於短數字串)
             });
             scanBtn.disabled = false;
             scanBtn.innerText = "立即掃描";
+            statusDiv.innerText = "請對準數字後按下按鈕";
         }
 
         // 影像增強處理
@@ -138,8 +145,8 @@
             const data = imageData.data;
             for (let i = 0; i < data.length; i += 4) {
                 const avg = (data[i] + data[i + 1] + data[i + 2]) / 3;
-                // 強力二值化：過濾灰色雜訊，讓數字黑白分明
-                const val = avg > 120 ? 255 : 0; 
+                // 強力二值化：提高閾值至 150，讓對比更明顯
+                const val = avg > 150 ? 255 : 0; 
                 data[i] = data[i + 1] = data[i + 2] = val;
             }
             ctx.putImageData(imageData, 0, 0);
@@ -153,26 +160,52 @@
             resultText.style.color = "#555";
             statusDiv.innerText = "正在分析影像...";
 
+            // 確保 video metadata 已載入
+            if (video.videoWidth === 0) {
+                 statusDiv.innerText = "相機影像尚未準備好，請稍候。";
+                 scanBtn.disabled = false;
+                 scanBtn.innerText = "立即掃描";
+                 return;
+            }
+            
             const w = video.videoWidth;
             const h = video.videoHeight;
             const ctx = canvas.getContext('2d');
 
-            // 計算精確裁切位置
-            const cropW = w * 0.6;
-            const cropH = (h / video.offsetHeight) * 70;
+            // 計算精確裁切位置 (根據 CSS 中的 .scan-region 調整)
+            const videoContainer = document.querySelector('.video-container');
+            const scanRegion = document.querySelector('.scan-region');
+
+            // 取得 CSS 設定的實際比例
+            const cssCropWidthRatio = parseFloat(scanRegion.style.width) / 100;
+            const cssCropHeight = parseFloat(scanRegion.style.height); // 100px
+
+            // 計算在視訊畫面上的像素寬度 (60% 的 videoWidth)
+            const cropW = w * cssCropWidthRatio;
+            
+            // 計算在視訊畫面上的像素高度 (用 CSS 高度與 video-container 高度的比例計算)
+            const containerHeight = videoContainer.offsetHeight;
+            const cropH = (h / videoContainer.offsetHeight) * cssCropHeight;
+
             const startX = (w - cropW) / 2;
             const startY = (h - cropH) / 2;
 
-            // 放大 3 倍（單次掃描可以承受更高的運算量以換取精準度）
-            canvas.width = cropW * 3;
-            canvas.height = cropH * 3;
+            // 放大 5 倍
+            const scaleFactor = 5; 
+            canvas.width = cropW * scaleFactor;
+            canvas.height = cropH * scaleFactor;
 
+            // 繪製並放大影像
             ctx.drawImage(video, startX, startY, cropW, cropH, 0, 0, canvas.width, canvas.height);
+            
+            // 進行影像處理
             processCapture(ctx, canvas.width, canvas.height);
 
             try {
                 const { data: { text, confidence } } = await worker.recognize(canvas);
-                const digits = text.replace(/\D/g, '').trim();
+                
+                // 移除所有非數字字符，並去除空白
+                const digits = text.replace(/\D/g, '').trim(); 
 
                 // 檢查是否為 4 位數
                 if (digits.length === 4) {
@@ -181,13 +214,17 @@
                     statusDiv.innerText = `辨識成功 (信心度: ${Math.round(confidence)}%)`;
                 } else if (digits.length > 0) {
                     resultText.innerText = digits;
-                    statusDiv.innerText = `偵測到 ${digits.length} 位數，請對準 4 位數字重試`;
+                    resultText.style.color = "#ffdd00";
+                    statusDiv.innerText = `偵測到 ${digits.length} 位數 (${digits})，請對準 4 位數字重試`;
                 } else {
+                    resultText.innerText = "----";
                     statusDiv.innerText = "未能辨識數字，請靠近一點或改善光線";
+                    resultText.style.color = "#ff5555";
                 }
             } catch (err) {
                 statusDiv.innerText = "辨識出錯，請重試";
-                console.error(err);
+                resultText.style.color = "#ff5555";
+                console.error("OCR error:", err);
             }
 
             // 恢復按鈕
@@ -197,9 +234,15 @@
 
         scanBtn.addEventListener('click', performScan);
 
+        // 啟動流程
         (async () => {
             await initCamera();
-            await initTesseract();
+            // 在確保 video metadata 載入後，再初始化 Tesseract
+            video.addEventListener('loadedmetadata', async () => {
+                // 等待 1 秒讓畫面穩定
+                await new Promise(r => setTimeout(r, 1000)); 
+                await initTesseract();
+            }, { once: true });
         })();
     </script>
 </body>
